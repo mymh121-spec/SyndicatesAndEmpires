@@ -2,6 +2,25 @@ using System;
 
 namespace Game.Application.Turn
 {
+    [Serializable]
+    public sealed class RealtimeClockState
+    {
+        public double totalGameHours;
+        public double realAccumulator;
+        public int speed;
+        public int resumeSpeed;
+
+        public void Validate()
+        {
+            if (double.IsNaN(totalGameHours) || double.IsInfinity(totalGameHours) ||
+                totalGameHours < 0 || totalGameHours > 24 * 361 ||
+                double.IsNaN(realAccumulator) || double.IsInfinity(realAccumulator) ||
+                realAccumulator < 0 || realAccumulator > 10 ||
+                speed < 0 || speed > 4 || resumeSpeed < 1 || resumeSpeed > 4)
+                throw new ArgumentException("저장된 시계 상태가 올바르지 않습니다.");
+        }
+    }
+
     public enum RealtimeGameSpeed
     {
         Paused = 0,
@@ -119,6 +138,22 @@ namespace Game.Application.Turn
             if (clamped > 0)
                 _resumeSpeedMultiplier = clamped;
             return true;
+        }
+
+        public RealtimeClockState CaptureState() => new RealtimeClockState
+        {
+            totalGameHours = _totalGameHours, realAccumulator = _realAccumulator,
+            speed = _speedMultiplier, resumeSpeed = _resumeSpeedMultiplier
+        };
+
+        public void RestoreState(RealtimeClockState state, bool pause = false)
+        {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+            state.Validate();
+            _totalGameHours = state.totalGameHours;
+            _realAccumulator = state.realAccumulator;
+            _resumeSpeedMultiplier = state.resumeSpeed;
+            _speedMultiplier = pause ? 0 : state.speed;
         }
 
         public bool TogglePause()

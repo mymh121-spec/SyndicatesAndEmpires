@@ -76,6 +76,21 @@ Internal IDs and C# identifiers remain in English for maintainability. Player-fa
 - Returning to mode selection disconnects multiplayer and prevents both simulation paths from running together.
 - See `GAME_MODE_SELECTION_KO.md` for the player flow and setup details.
 
+## Single-player save and continue
+
+- Press `Esc` → `싱글플레이 저장` for the manual slot. The HUD and pause menu report completion or storage errors.
+- An independent automatic slot is saved after each complete daily settlement, when returning to mode selection, and when the application pauses. Starting a new game resets both economy and map; its autosaves do not overwrite the manual slot.
+- The main menu offers `이어하기 · 자동 저장` and `이어하기 · 수동 저장`, with the saved game day. Loading displays progress and resumes paused; press `Space` or a speed button to continue.
+- Desktop saves use `Application.persistentDataPath/SinglePlayerSaves`. WebGL saves use IndexedDB for the current site and browser profile. Clearing site data removes browser saves; they are not cloud saves or shared with multiplayer. Closing a browser tab cannot guarantee a final asynchronous write, so wait for manual-save completion before closing.
+- Each slot retains its previous valid copy. Checksums detect damaged data, and loading falls back to that copy. Desktop writes use a flushed temporary file and atomic replacement; browser writes acknowledge the completed IndexedDB transaction.
+- The format stores initial configuration, semantic player actions and compacted fixed simulation advances. Replay reconstructs economy, AI, map orders and pending operations, then restores the clock remainder, selection and camera. Long campaigns take longer to load. Schema, simulation rules and initial-data fingerprints reject incompatible saves instead of silently using different rules. When changing simulation behavior, update `SinglePlayerSave.CurrentRules`; new state-changing UI actions must be recorded and replayed.
+
+Save validation:
+
+- `dotnet run --project Validation/SinglePlayerSaveSmoke` (.NET 8): three seeds, 63 simulated days, replay equivalence, clock remainder, deterministic continuation and invalid-record rejection. This checks the pure simulation and DTO, not Unity's JSON codec or UI.
+- `node Validation/SinglePlayerWebStorageBrowserSmoke/server.cjs`, then open `http://127.0.0.1:8127`: actual IndexedDB persistence across reload, a 1.3 MB Unicode payload, separate slots and storage-error callbacks using the game's `.jslib`. Run on this isolated local origin, not the live game. The harness substitutes Unity's string/SendMessage bridge, so a real WebGL build is still required to validate that bridge.
+- In Unity Test Runner, run the EditMode fixture `Game.Tests.Playability.SinglePlayerSaveTests` for full controller/JSON save-load, queued commands, corruption recovery, failed writes, incompatible saves and new-game/multiplayer isolation. `Validation/UnityCoreCompile` also compiles the save UI and storage code against the installed Unity assemblies.
+
 ## Extended MVP systems
 
 - `LogisticsService` advances shipments in batches without a `MonoBehaviour` per vehicle.

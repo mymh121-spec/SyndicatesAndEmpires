@@ -115,6 +115,33 @@ namespace Game.Presentation
         public event Action<int> RealtimeFixedStepsAdvanced;
         public event Action RealtimeDayBoundaryReached;
         public event Action<TurnReport> RealtimeDayResolved;
+        public event Action<int, int, double> RealtimeAdvanceStarting;
+        public event Action RealtimeAdvanceCompleted;
+
+        public RealtimeClockState CaptureClock() => _realtimeClock.CaptureState();
+
+        public void RestoreClock(RealtimeClockState state, bool pause = true)
+        {
+            _realtimeClock.RestoreState(state, pause);
+            _lastRealtimeMinuteStamp = -1;
+            NotifyRealtimeStateWhenMinuteChanged();
+        }
+
+        public string SaveConfiguration()
+        {
+            var text = new System.Text.StringBuilder(FormattableString.Invariant(
+                $"{regionId}|{initialMarketStock}|{playerCompanyName}|{initialCompanyCash}|{aiCompanyCount}|{starterWarehouseCapacity}|{starterIronStock}|{starterCoalStock}|{starterWoodStock}|{starterFoodStock}|{starterEmployees}|{starterWorkers}|{starterPower}|{starterVehicles}"));
+            text.Append(simulationSettings == null ? "default" : JsonUtility.ToJson(simulationSettings));
+            text.Append(militaryBalance == null ? "default" : JsonUtility.ToJson(militaryBalance));
+            var resources = resourceAssets?.Length > 0 ? resourceAssets :
+                UnityEngine.Resources.LoadAll<ResourceDefinitionAsset>(string.Empty);
+            foreach (var asset in resources)
+                if (asset != null) text.Append(JsonUtility.ToJson(asset));
+            if (recipeAssets != null)
+                foreach (var asset in recipeAssets)
+                    if (asset != null) text.Append(JsonUtility.ToJson(asset));
+            return SinglePlayerSaveStore.Hash(text.ToString());
+        }
 
         private void Awake()
         {
@@ -122,6 +149,11 @@ namespace Game.Presentation
         }
 
         private void Update()
+        {
+            AdvanceRealtime(Time.unscaledDeltaTime);
+        }
+
+        public void AdvanceRealtime(double seconds)
         {
             if (_realtimeClock == null ||
                 _simulation == null ||
@@ -131,17 +163,31 @@ namespace Game.Presentation
             }
 
             RealtimeAdvanceResult advance = _realtimeClock.Advance(
-                Time.unscaledDeltaTime);
+                seconds);
             if (advance.FixedStepCount <= 0)
                 return;
 
-            // Map movement, capture, AI, and stamina all follow the same
-            // simulation speed as the in-game clock.
-            RealtimeFixedStepsAdvanced?.Invoke(
-                advance.FixedStepCount * _realtimeClock.SpeedMultiplier);
+            int mapSteps = advance.FixedStepCount * _realtimeClock.SpeedMultiplier;
+            RealtimeAdvanceStarting?.Invoke(
+                mapSteps, advance.CompletedGameDays, _realtimeClock.TotalGameHours);
+            ResolveRealtimeAdvance(mapSteps, advance.CompletedGameDays);
+            RealtimeAdvanceCompleted?.Invoke();
+        }
+
+        public void ReplayRealtimeAdvance(int mapSteps, int completedDays, double hours)
+        {
+            RealtimeClockState state = CaptureClock();
+            state.totalGameHours = hours;
+            _realtimeClock.RestoreState(state, true);
+            ResolveRealtimeAdvance(mapSteps, completedDays);
+        }
+
+        private void ResolveRealtimeAdvance(int mapSteps, int completedDays)
+        {
+            RealtimeFixedStepsAdvanced?.Invoke(mapSteps);
 
             for (int i = 0;
-                 i < advance.CompletedGameDays && !IsCampaignFinished;
+                 i < completedDays && !IsCampaignFinished;
                  i++)
             {
                 RealtimeDayBoundaryReached?.Invoke();
@@ -219,6 +265,7 @@ namespace Game.Presentation
             _worldEconomy = null;
             _autonomousWorldState = null;
             _autonomousWorldService = null;
+            _worldMapOwnership = null;
             _campaignRules = null;
             _realtimeClock = null;
             _lastRealtimeMinuteStamp = -1;

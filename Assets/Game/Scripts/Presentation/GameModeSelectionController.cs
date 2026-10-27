@@ -16,7 +16,7 @@ using UnityEngine.UIElements;
 namespace Game.Presentation
 {
     [DisallowMultipleComponent]
-    public sealed class GameModeSelectionController : MonoBehaviour
+    public sealed partial class GameModeSelectionController : MonoBehaviour
     {
         [Header("게임 모드 실행 대상")]
         [SerializeField] private SimulationBootstrapper singlePlayerSimulation;
@@ -190,6 +190,7 @@ namespace Game.Presentation
 
         private void Update()
         {
+            if (_isRestoringSave) return;
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (_selection.HasSelection &&
                 UnityEngine.Input.GetKeyDown(KeyCode.Escape))
@@ -215,6 +216,7 @@ namespace Game.Presentation
 
         private void OnGUI()
         {
+            if (_isRestoringSave) return;
             Event currentEvent = Event.current;
             if (!_selection.HasSelection ||
                 currentEvent == null ||
@@ -291,6 +293,8 @@ namespace Game.Presentation
                 HandleRealtimeFixedStepsAdvanced;
             singlePlayerSimulation.RealtimeDayBoundaryReached +=
                 HandleRealtimeDayBoundaryReached;
+            singlePlayerSimulation.RealtimeAdvanceStarting += RecordRealtimeAdvance;
+            singlePlayerSimulation.RealtimeAdvanceCompleted += CompleteRecordedAdvance;
             _singlePlayerEventsBound = true;
         }
 
@@ -420,6 +424,7 @@ namespace Game.Presentation
                 "SYNDICATES & EMPIRES",
                 string.Empty);
             AddButton(_modeView, "1인이서 하기", ShowSinglePlayerSetup);
+            BuildContinueButtons();
             AddButton(_modeView, "여러 명이서 하기", SelectMultiplayer);
 
             _singlePlayerSetupView = CreateCard(
@@ -559,6 +564,7 @@ namespace Game.Presentation
                 "1인 플레이",
                 string.Empty);
             _singlePlayerView.name = "single-player-hud";
+            BuildSaveHudStatus();
             _singleStatusToggleButton = CreateMapActionButton(
                 "상태 정보 접기 ▲",
                 ToggleSinglePlayerStatus);
@@ -659,6 +665,7 @@ namespace Game.Presentation
 
         private void SelectSinglePlayer()
         {
+            _saveLog = null;
             _selection.Clear();
             if (!_selection.TrySelect(GamePlayMode.SinglePlayer, out string reason))
             {
@@ -678,6 +685,8 @@ namespace Game.Presentation
             multiplayerSession?.Disconnect();
             SetServiceActive(multiplayerSession, false);
             SetServiceActive(singlePlayerSimulation, true);
+            singlePlayerSimulation.RestartSimulation();
+            BeginSinglePlayerRecording(mapSettings);
             SetVisible(_modeView, false);
             SetVisible(_singlePlayerSetupView, false);
             SetVisible(_connectionView, false);
@@ -1048,19 +1057,7 @@ namespace Game.Presentation
 
         private void ConfirmSinglePlayerResult()
         {
-            _queuedOperationId = string.Empty;
-            _hasPendingDelegatedMission = false;
-            _selectedOperationIndex = 0;
-            _selectedOperationApproachIndex = 0;
-            ResetCampaignHudTracking();
-            singlePlayerSimulation.RestartSimulation();
-            gameplayMap?.ResetMap();
-            SetVisible(_singlePlayerResultView, false);
-            SetVisible(_singlePlayerView, true);
-            ShowGameplayHud();
-            RefreshSinglePlayerStatus();
-            if (gameplayMap?.CurrentSelection.HasValue == true)
-                HandleMapCellSelected(gameplayMap.CurrentSelection.Value);
+            SelectSinglePlayer();
         }
 
         private async void MarkMultiplayerReady()
@@ -1098,6 +1095,8 @@ namespace Game.Presentation
 
         private void ShowModeSelection()
         {
+            if (!_isRestoringSave && _selection.IsSinglePlayer)
+                _ = SaveSinglePlayerAsync("auto");
             _hasPendingDelegatedMission = false;
             HideMapContextMenu();
             multiplayerSession?.Disconnect();
@@ -2241,6 +2240,7 @@ namespace Game.Presentation
 
         private void CreatePlayerUnit()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.Recruit);
             if (gameplayMap == null || singlePlayerSimulation == null)
                 return;
 
@@ -2297,6 +2297,7 @@ namespace Game.Presentation
 
         private void EquipSelectedPlayerUnit()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.Equip);
             if (gameplayMap == null || singlePlayerSimulation == null)
                 return;
 
@@ -2415,6 +2416,7 @@ namespace Game.Presentation
 
         private void HirePendingCommander()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.HireCommander);
             if (gameplayMap == null || singlePlayerSimulation == null)
                 return;
 
@@ -2589,6 +2591,7 @@ namespace Game.Presentation
 
         private void MoveSelectedPlayerUnit()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.Move);
             if (gameplayMap == null ||
                 singlePlayerSimulation == null ||
                 !gameplayMap.CurrentSelection.HasValue)
@@ -2634,6 +2637,7 @@ namespace Game.Presentation
 
         private void TrackAndAttackSelectedEnemyUnit()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.Attack);
             if (gameplayMap == null ||
                 !gameplayMap.CurrentSelection.HasValue)
             {
@@ -2675,6 +2679,7 @@ namespace Game.Presentation
 
         private void CancelSelectedPlayerUnitMove()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.CancelMove);
             if (gameplayMap == null)
                 return;
 
@@ -2697,6 +2702,7 @@ namespace Game.Presentation
 
         private void CaptureSelectedMine()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.CaptureMine);
             if (gameplayMap == null || !gameplayMap.CurrentSelection.HasValue)
                 return;
 
@@ -2747,6 +2753,7 @@ namespace Game.Presentation
 
         private void SurveySelectedEconomicSite()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.Survey);
             if (gameplayMap == null ||
                 singlePlayerSimulation == null ||
                 !gameplayMap.CurrentSelection.HasValue)
@@ -2802,6 +2809,7 @@ namespace Game.Presentation
 
         private void StartSelectedMineConstruction()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.BuildMine);
             if (gameplayMap == null ||
                 singlePlayerSimulation == null ||
                 !gameplayMap.CurrentSelection.HasValue)
@@ -3123,6 +3131,7 @@ namespace Game.Presentation
 
         private void SetSelectedOccupationPolicy(MapOccupationPolicy policy)
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.OccupationPolicy, (int)policy);
             if (gameplayMap == null || !gameplayMap.CurrentSelection.HasValue)
                 return;
 
@@ -3147,6 +3156,7 @@ namespace Game.Presentation
 
         private void CycleSelectedSiegeAction()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.SiegeAction);
             if (gameplayMap == null || !gameplayMap.CurrentSelection.HasValue)
                 return;
 
@@ -3320,6 +3330,7 @@ namespace Game.Presentation
 
         private void CaptureOrSiegeSelectedCastle()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.CaptureCastle);
             if (gameplayMap == null || !gameplayMap.CurrentSelection.HasValue)
                 return;
 
@@ -3353,6 +3364,7 @@ namespace Game.Presentation
 
         private void CycleSelectedCastleRole()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.CastleRole);
             if (gameplayMap == null || !gameplayMap.CurrentSelection.HasValue)
                 return;
 
@@ -3416,6 +3428,7 @@ namespace Game.Presentation
         private void AssignSelectedSupplyMission(
             MapSupplyMissionKind missionKind)
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.SupplyMission, (int)missionKind);
             if (gameplayMap == null || !gameplayMap.CurrentSelection.HasValue)
                 return;
 
@@ -4131,6 +4144,7 @@ namespace Game.Presentation
 
         private void QueueSelectedOperation()
         {
+            using var recording = RecordSinglePlayerAction(SinglePlayerAction.EconomicOperation);
             if (_hasPendingDelegatedMission)
             {
                 SetOperationFeedback(
@@ -4873,6 +4887,7 @@ namespace Game.Presentation
             _pauseMenuView.name = "pause-menu";
             _pauseMenuView.style.width = 460;
             AddButton(_pauseMenuView, "계속하기", ClosePauseMenu);
+            BuildSavePauseControls();
             AddButton(_pauseMenuView, "키 설정", OpenKeySettings);
             AddButton(
                 _pauseMenuView,
@@ -4943,6 +4958,8 @@ namespace Game.Presentation
                 return;
 
             HideMapContextMenu();
+            SetVisible(_manualSaveButton, _selection.IsSinglePlayer);
+            SetVisible(_saveStatus, _selection.IsSinglePlayer);
             CloseNeutralNpcView();
             _resumeRealtimeAfterPauseMenu =
                 singlePlayerSimulation != null &&
@@ -5602,6 +5619,8 @@ namespace Game.Presentation
                     HandleRealtimeFixedStepsAdvanced;
                 singlePlayerSimulation.RealtimeDayBoundaryReached -=
                     HandleRealtimeDayBoundaryReached;
+                singlePlayerSimulation.RealtimeAdvanceStarting -= RecordRealtimeAdvance;
+                singlePlayerSimulation.RealtimeAdvanceCompleted -= CompleteRecordedAdvance;
                 _singlePlayerEventsBound = false;
             }
             if (multiplayerSession != null && _multiplayerEventsBound)

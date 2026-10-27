@@ -209,6 +209,50 @@ namespace Game.Presentation
         public Color GetFactionDisplayColor(string factionId) =>
             GetFactionColor(factionId);
         public MapGenerationSettings GenerationSettings { get; private set; }
+        public Vector3 SaveCameraFocus => _cameraFocus;
+        public float SaveCameraZoom => _mapCamera != null ? _mapCamera.orthographicSize : startingZoom;
+        private bool _deferSaveVisuals;
+
+        public void SetSaveReplayMode(bool active)
+        {
+            _deferSaveVisuals = active;
+            if (!active) RefreshGameplayMarkers();
+        }
+
+        public void RestoreSaveSelection(string unitId, bool hasCell, int x, int y,
+            string targetUnitId, string trackedEnemyUnitId)
+        {
+            MapUnitState unit = _gameplayService?.FindUnit(unitId ?? string.Empty);
+            if (unit != null && unit.OwnerFactionId != _gameplayService.PlayerFactionId)
+                throw new ArgumentException("저장된 선택 부대의 소유자가 다릅니다.");
+            _selectedPlayerUnitId = unit?.Id ?? string.Empty;
+            _trackedEnemyUnitId = trackedEnemyUnitId ?? string.Empty;
+            if (hasCell)
+            {
+                var coordinate = new GridCoordinate(x, y);
+                if (!CurrentLayout.TryNormalize(coordinate, out var normalized))
+                    throw new ArgumentException("저장된 지도 좌표가 올바르지 않습니다.");
+                CurrentSelection = DescribeCell(CurrentLayout, normalized);
+                MapUnitState target = _gameplayService.FindUnit(targetUnitId ?? string.Empty);
+                if (target != null)
+                    CurrentSelection = WithTrackedUnit(CurrentSelection.Value, target);
+            }
+            else CurrentSelection = null;
+            RefreshGameplayMarkers();
+        }
+
+        public void RestoreSaveCamera(float x, float z, float zoom)
+        {
+            if (float.IsNaN(x) || float.IsInfinity(x) || float.IsNaN(z) ||
+                float.IsInfinity(z) || float.IsNaN(zoom) || float.IsInfinity(zoom))
+                return;
+            _cameraFocus.x = x;
+            _cameraFocus.z = z;
+            if (_mapCamera != null)
+                _mapCamera.orthographicSize = Mathf.Clamp(zoom, minimumZoom, maximumZoom);
+            ClampAndWrapCameraFocus();
+            ApplyCameraTransform();
+        }
         public event Action<MapCellSelection> CellSelected;
         public event Action<MapCellSelection> CellMoveRequested;
         public event Action PrimaryCellSelected;
@@ -2137,6 +2181,9 @@ namespace Game.Presentation
 
         private void RefreshGameplayMarkers()
         {
+            // Replay still emits gameplay events, but creates the final set of
+            // marker objects only once instead of rebuilding on every record.
+            if (_deferSaveVisuals) return;
             if (_generatedRoot == null || _gameplayService == null)
                 return;
 
