@@ -1,0 +1,54 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><title>Single-player browser save checks</title>
+<style>body{background:#142030;color:#d9f0e6;font:18px/1.7 system-ui;padding:40px}pre{white-space:pre-wrap}</style>
+<h1>브라우저 저장 검증</h1><pre id="result">IndexedDB 검사 중…</pre>
+<script>
+var LibraryManager = {library:{}};
+function mergeInto(target, source) {Object.assign(target, source)}
+function UTF8ToString(value) {return value}
+var requests = new Map();
+function SendMessage(receiver, method, json) {
+  const result = JSON.parse(json), waiting = requests.get(result.id);
+  if (!waiting) return;
+  requests.delete(result.id);
+  result.error ? waiting.reject(new Error(result.error)) : waiting.resolve(result.value);
+}
+</script><script src="/save.js"></script><script>
+var SE_SaveRequest = LibraryManager.library.$SE_SaveRequest;
+let nextId = 0;
+function request(key, value) {
+  return new Promise((resolve, reject) => {
+    let id = ++nextId;
+    requests.set(id, {resolve, reject});
+    if (value === undefined) LibraryManager.library.SE_SaveRead('test', id, key);
+    else LibraryManager.library.SE_SaveWrite('test', id, key, value);
+  });
+}
+function check(condition, message) {if (!condition) throw new Error(message)}
+(async function() {
+  const payload = '한글 저장·이어하기|' + 'x'.repeat(1300000);
+  if (sessionStorage.getItem('save-check-stage') !== 'reload') {
+    check(await request('missing-' + Date.now()) === null, 'Missing slot');
+    await request('manual', payload);
+    check(await request('manual') === payload, 'Large payload round trip');
+    await request('manual.backup', payload);
+    await request('auto', '자동 저장 별도 슬롯');
+    sessionStorage.setItem('save-check-stage', 'reload');
+    location.reload();
+    return;
+  }
+  check(await request('manual') === payload, 'Persistence across page reload');
+  check(await request('manual.backup') === payload, 'Backup persistence');
+  check(await request('auto') === '자동 저장 별도 슬롯', 'Independent slots');
+  const originalOpen = indexedDB.open;
+  let rejected = false;
+  try {
+    indexedDB.open = function() {throw new Error('blocked storage')};
+    await request('manual');
+  } catch(error) {rejected = true}
+  finally {indexedDB.open = originalOpen}
+  check(rejected, 'Storage errors must reach the caller');
+  sessionStorage.removeItem('save-check-stage');
+  document.querySelector('#result').textContent =
+    'PASS: 빈 슬롯 읽기\nPASS: 1.3 MB 데이터 + 한글 보존\nPASS: 새로고침 후 복원\nPASS: 수동/자동/백업 슬롯 분리\nPASS: 저장소 사용 불가 오류 전달\n실제 IndexedDB와 게임의 .jslib 플러그인으로 검증했습니다.';
+})().catch(error => document.querySelector('#result').textContent = 'FAIL: ' + error.stack);
+</script></html>

@@ -21,8 +21,10 @@
              Link="Shared\Presentation\TurnReportKoreanFormatter.cs" />
     <Compile Include="..\..\Assets\Game\Scripts\Presentation\CampaignResultKoreanFormatter.cs"
              Link="Shared\Presentation\CampaignResultKoreanFormatter.cs" />
-    <Compile Include="..\..\Assets\Game\Scripts\Presentation\GameModeSelectionController.cs"
-             Link="Shared\Presentation\GameModeSelectionController.cs" />
+    <Compile Include="..\..\Assets\Game\Scripts\Presentation\GameModeSelectionController*.cs"
+             Link="Shared\Presentation\%(Filename)%(Extension)" />
+    <Compile Include="..\..\Assets\Game\Scripts\Presentation\SinglePlayer*Storage.cs" />
+    <Compile Include="..\..\Assets\Game\Scripts\Presentation\SinglePlayerSaveStore.cs" />
     <Compile Include="..\..\Assets\Game\Scripts\Presentation\StarterMapController.cs"
              Link="Shared\Presentation\StarterMapController.cs" />
     <Compile Include="..\..\Assets\Game\Scripts\Presentation\PvpHttpClient.cs"
